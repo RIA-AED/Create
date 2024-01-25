@@ -10,6 +10,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 
 import com.jozufozu.flywheel.backend.instancing.InstancedRenderDispatcher;
@@ -75,6 +79,7 @@ public class BeltTileEntity extends KineticTileEntity {
 	protected BlockPos controller;
 	protected BeltInventory inventory;
 	protected LazyOptional<IItemHandler> itemHandler;
+	private boolean firstTicked = false;
 
 	public CompoundTag trackerUpdateTag;
 
@@ -97,9 +102,9 @@ public class BeltTileEntity extends KineticTileEntity {
 	public void addBehaviours(List<TileEntityBehaviour> behaviours) {
 		super.addBehaviours(behaviours);
 		behaviours.add(new DirectBeltInputBehaviour(this).onlyInsertWhen(this::canInsertFrom)
-			.setInsertionHandler(this::tryInsertingFromSide));
+				.setInsertionHandler(this::tryInsertingFromSide));
 		behaviours.add(new TransportedItemStackHandlerBehaviour(this, this::applyToAllItems)
-			.withStackPlacement(this::getWorldPositionOf));
+				.withStackPlacement(this::getWorldPositionOf));
 	}
 
 	@Override
@@ -112,7 +117,7 @@ public class BeltTileEntity extends KineticTileEntity {
 
 		if (!AllBlocks.BELT.has(level.getBlockState(worldPosition)))
 			return;
-
+		firstTicked = true;
 		initializeItemHandler();
 
 		// Move Items
@@ -139,7 +144,7 @@ public class BeltTileEntity extends KineticTileEntity {
 		passengers.forEach((entity, info) -> {
 			boolean canBeTransported = BeltMovementHandler.canBeTransported(entity);
 			boolean leftTheBelt =
-				info.getTicksSinceLastCollision() > ((getBlockState().getValue(BeltBlock.SLOPE) != HORIZONTAL) ? 3 : 1);
+					info.getTicksSinceLastCollision() > ((getBlockState().getValue(BeltBlock.SLOPE) != HORIZONTAL) ? 3 : 1);
 			if (!canBeTransported || leftTheBelt) {
 				toRemove.add(entity);
 				return;
@@ -173,8 +178,17 @@ public class BeltTileEntity extends KineticTileEntity {
 			return;
 		if (!level.isLoaded(controller))
 			return;
-		BlockEntity te = level.getBlockEntity(controller);
-		if (te == null || !(te instanceof BeltTileEntity))
+		if (!firstTicked) {
+			return;
+		}
+        BlockEntity te = null;
+        try {
+            te = CompletableFuture.supplyAsync(()-> level.getBlockEntity(controller)).get(3, TimeUnit.SECONDS);
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+			System.out.println("Belt deadlocking, force interrupt it"); //如果firstTick修复没起效，这个兜底
+			e.printStackTrace();
+        }
+        if (te == null || !(te instanceof BeltTileEntity))
 			return;
 		BeltInventory inventory = ((BeltTileEntity) te).getInventory();
 		if (inventory == null)
@@ -201,7 +215,7 @@ public class BeltTileEntity extends KineticTileEntity {
 		if (isController())
 			getInventory().ejectAll();
 	}
-	
+
 	@Override
 	public void invalidate() {
 		super.invalidate();
@@ -234,7 +248,7 @@ public class BeltTileEntity extends KineticTileEntity {
 			controller = worldPosition;
 
 		color = compound.contains("Dye") ? Optional.of(NBTHelper.readEnum(compound, "Dye", DyeColor.class))
-			: Optional.empty();
+				: Optional.empty();
 
 		if (!wasMoved) {
 			if (!isController())
@@ -316,7 +330,7 @@ public class BeltTileEntity extends KineticTileEntity {
 
 	public boolean isController() {
 		return controller != null && worldPosition.getX() == controller.getX()
-			&& worldPosition.getY() == controller.getY() && worldPosition.getZ() == controller.getZ();
+				&& worldPosition.getY() == controller.getY() && worldPosition.getZ() == controller.getZ();
 	}
 
 	public float getBeltMovementSpeed() {
@@ -325,7 +339,7 @@ public class BeltTileEntity extends KineticTileEntity {
 
 	public float getDirectionAwareBeltMovementSpeed() {
 		int offset = getBeltFacing().getAxisDirection()
-			.getStep();
+				.getStep();
 		if (getBeltFacing().getAxis() == Axis.X)
 			offset *= -1;
 		return getBeltMovementSpeed() * offset;
@@ -350,7 +364,7 @@ public class BeltTileEntity extends KineticTileEntity {
 			return false;
 
 		boolean movingPositively = (getSpeed() > 0 == (direction.getAxisDirection()
-			.getStep() == 1)) ^ direction.getAxis() == Axis.X;
+				.getStep() == 1)) ^ direction.getAxis() == Axis.X;
 		return part == BeltPart.START ^ movingPositively;
 	}
 
@@ -411,7 +425,7 @@ public class BeltTileEntity extends KineticTileEntity {
 	}
 
 	private void applyToAllItems(float maxDistanceFromCenter,
-		Function<TransportedItemStack, TransportedResult> processFunction) {
+								 Function<TransportedItemStack, TransportedResult> processFunction) {
 		BeltTileEntity controller = getControllerTE();
 		if (controller == null)
 			return;
@@ -432,14 +446,14 @@ public class BeltTileEntity extends KineticTileEntity {
 			return;
 		if (casing != CasingType.NONE)
 			level.levelEvent(2001, worldPosition,
-				Block.getId(casing == CasingType.ANDESITE ? AllBlocks.ANDESITE_CASING.getDefaultState()
-					: AllBlocks.BRASS_CASING.getDefaultState()));
+					Block.getId(casing == CasingType.ANDESITE ? AllBlocks.ANDESITE_CASING.getDefaultState()
+							: AllBlocks.BRASS_CASING.getDefaultState()));
 		casing = type;
 		boolean shouldBlockHaveCasing = type != CasingType.NONE;
 		BlockState blockState = getBlockState();
 		if (blockState.getValue(BeltBlock.CASING) != shouldBlockHaveCasing)
 			KineticTileEntity.switchToBlockState(level, worldPosition,
-				blockState.setValue(BeltBlock.CASING, shouldBlockHaveCasing));
+					blockState.setValue(BeltBlock.CASING, shouldBlockHaveCasing));
 		setChanged();
 		sendData();
 	}
@@ -449,7 +463,7 @@ public class BeltTileEntity extends KineticTileEntity {
 			return false;
 		BlockState state = getBlockState();
 		if (state.hasProperty(BeltBlock.SLOPE) && (state.getValue(BeltBlock.SLOPE) == BeltSlope.SIDEWAYS
-			|| state.getValue(BeltBlock.SLOPE) == BeltSlope.VERTICAL))
+				|| state.getValue(BeltBlock.SLOPE) == BeltSlope.VERTICAL))
 			return false;
 		return getMovementFacing() != side.getOpposite();
 	}
@@ -470,7 +484,7 @@ public class BeltTileEntity extends KineticTileEntity {
 			BrassTunnelTileEntity tunnelTE = (BrassTunnelTileEntity) teAbove;
 			if (tunnelTE.hasDistributionBehaviour()) {
 				if (!tunnelTE.getStackToDistribute()
-					.isEmpty())
+						.isEmpty())
 					return inserted;
 				if (!tunnelTE.testFlapFilter(side.getOpposite(), inserted))
 					return inserted;
@@ -496,10 +510,10 @@ public class BeltTileEntity extends KineticTileEntity {
 
 		Direction movementFacing = getMovementFacing();
 		if (!side.getAxis()
-			.isVertical()) {
+				.isVertical()) {
 			if (movementFacing != side) {
 				transportedStack.sideOffset = side.getAxisDirection()
-					.getStep() * .35f;
+						.getStep() * .35f;
 				if (side.getAxis() == Axis.X)
 					transportedStack.sideOffset *= -1;
 			} else
@@ -524,18 +538,18 @@ public class BeltTileEntity extends KineticTileEntity {
 	@Override
 	public IModelData getModelData() {
 		return new ModelDataMap.Builder().withInitial(CASING_PROPERTY, casing)
-			.build();
+				.build();
 	}
 
 	@Override
 	protected boolean canPropagateDiagonally(IRotate block, BlockState state) {
 		return state.hasProperty(BeltBlock.SLOPE) && (state.getValue(BeltBlock.SLOPE) == BeltSlope.UPWARD
-			|| state.getValue(BeltBlock.SLOPE) == BeltSlope.DOWNWARD);
+				|| state.getValue(BeltBlock.SLOPE) == BeltSlope.DOWNWARD);
 	}
 
 	@Override
 	public float propagateRotationTo(KineticTileEntity target, BlockState stateFrom, BlockState stateTo, BlockPos diff,
-		boolean connectedViaAxes, boolean connectedViaCogs) {
+									 boolean connectedViaAxes, boolean connectedViaCogs) {
 		if (target instanceof BeltTileEntity && !connectedViaAxes)
 			return getController().equals(((BeltTileEntity) target).getController()) ? 1 : 0;
 		return 0;
@@ -567,6 +581,7 @@ public class BeltTileEntity extends KineticTileEntity {
 
 		/**
 		 * Get the number of belt segments represented by the lighter.
+		 *
 		 * @return The number of segments.
 		 */
 		public int lightSegments() {
@@ -575,6 +590,7 @@ public class BeltTileEntity extends KineticTileEntity {
 
 		/**
 		 * Get the light value for a given segment.
+		 *
 		 * @param segment The segment to get the light value for.
 		 * @return The light value.
 		 */
