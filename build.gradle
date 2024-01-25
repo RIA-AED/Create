@@ -36,7 +36,9 @@ archivesBaseName = "create-${artifact_minecraft_version}"
 version = mod_version + (dev && buildNumber != null ? "-${buildNumber}" : '')
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
-
+tasks.withType(Javadoc) {
+    enabled = false
+}
 println('Java: ' + System.getProperty('java.version') + ' JVM: ' + System.getProperty('java.vm.version') + '(' + System.getProperty('java.vendor') + ') Arch: ' + System.getProperty('os.arch'))
 minecraft {
     mappings channel: 'parchment', version: "${parchment_version}-${minecraft_version}"
